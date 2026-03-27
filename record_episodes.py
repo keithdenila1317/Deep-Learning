@@ -6,54 +6,81 @@
 #####################################################################
 
 import os
-from random import choice
-
 import vizdoom as vzd
 import numpy as np 
 import shutil
+from random import choice
+import re
 
-# 1. This magically finds the folder where record_episodes.py is currently sitting
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# 2. Build the path dynamically for the specific player/skill
+# Skill Level Folders {Novice/Expert}
 skill_level = "Novice"
 target_recording = os.path.join(BASE_DIR, "Recordings", skill_level)
 
 game = vzd.DoomGame()
 
-# Use other config file if you wish.
-game.load_config(os.path.join(vzd.scenarios_path, "defend_the_center.cfg"))
-game.set_episode_timeout(100)
+game.load_config("custom_deathmatch.cfg")
+wad_path = os.path.join(vzd.scenarios_path, "deathmatch.wad")
+game.set_doom_scenario_path(wad_path)
+game.set_episode_timeout(10500)
 
-# Record episodes while playing in 320x240 resolution without HUD
 game.set_screen_resolution(vzd.ScreenResolution.RES_800X600)
 game.set_render_hud(False)
 
-# Episodes can be recorder in any available mode (PLAYER, ASYNC_PLAYER, SPECTATOR, ASYNC_SPECTATOR)
 game.set_mode(vzd.Mode.ASYNC_SPECTATOR)
+
+# --- STANDARDIZED TEAM SETTINGS ---
+
+# Sensitivity 
+game.add_game_args("+set sensitivity 1.5") 
+# Mouse Acceleration
+game.add_game_args("+set m_customaccel 0") 
+# Mouse Smoothing
+game.add_game_args("+set m_filter 0") 
+# FOV
+game.add_game_args("+set fov 90")
+# Freelook
+game.add_game_args("+freelook 1")
 
 game.init()
 
-actions = [[True, False, False], [False, True, False], [False, False, True]]
+# --- FORCE MODERN BINDING ---
 
-# Run and record this many episodes
-episodes = 3
+game.send_game_command("bind w +forward")
+game.send_game_command("bind s +back")
+game.send_game_command("bind a +moveleft")
+game.send_game_command("bind d +moveright")
 
-# Recording
+
+if not os.path.exists(target_recording) :
+    os.makedirs(target_recording)
+
+max_count = -1
+
+for filename in os.listdir(target_recording) :
+    match = re.search(r'episode(\d+)_rec\.lmp', filename)
+    if match :
+        cont_num = int(match.group(1))
+        if cont_num > max_count :
+            max_count = cont_num
+        
+start_index = max_count + 1
+
+# Number of recordings per session
+episodes = 1
+
 print("\nRECORDING EPISODES")
 print("************************\n")
 
-for i in range(episodes):
+for i in range(start_index, start_index + episodes) :
 
-    # new_episode can record the episode using Doom's demo recording functionality to given file.
-    # Recorded episodes can be reconstructed with perfect accuracy using different rendering settings.
-    # This can not be used to record episodes in multiplayer mode.
     game.new_episode(f"episode{i}_rec.lmp")
 
-    while not game.is_episode_finished():
+    while not game.is_episode_finished() :
+
         s = game.get_state()
-        
-        # Just advance the frame. YOU press the keys!
+
         game.advance_action() 
 
         print(f"State #{s.number} recorded!")
@@ -62,14 +89,13 @@ for i in range(episodes):
     print("Total reward:", game.get_total_reward())
     print("************************\n")
 
-game.new_episode()  # This is currently required to stop and save the previous recording.
+game.new_episode()  
 game.close()
 
-# New render settings for replay
+# Downsampled rendering for replay
 game.set_screen_resolution(vzd.ScreenResolution.RES_160X120)
 game.set_render_hud(True)
 
-# Replay can be played in any mode.
 game.set_mode(vzd.Mode.SPECTATOR)
 
 game.init()
@@ -77,20 +103,17 @@ game.init()
 print("\nREPLAY OF EPISODE")
 print("************************\n")
 
-for i in range(episodes):
+for i in range(start_index, start_index + episodes) :
 
-    # Replays episodes stored in given file. Sending game command will interrupt playback.
     game.replay_episode(f"episode{i}_rec.lmp")
 
-    while not game.is_episode_finished():
-        # Get a state
+    while not game.is_episode_finished() :
+
         s = game.get_state()
         assert s is not None and s.game_variables is not None
 
-        # Use advance_action instead of make_action to proceed
         game.advance_action()
 
-        # Retrieve the last actions and the reward
         a = game.get_last_action()
         r = game.get_last_reward()
 
