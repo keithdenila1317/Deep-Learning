@@ -68,7 +68,7 @@ for filename in os.listdir(target_recording) :
 start_index = max_count + 1
 
 # Number of recordings per session
-episodes = 1
+episodes = 5
 
 print("\nRECORDING EPISODES")
 print("************************\n")
@@ -129,7 +129,7 @@ for i in range(start_index, start_index + episodes) :
 
 game.close()
 
-for i in range(episodes):
+for i in range(start_index, start_index + episodes):
    s_file = f"episode{i}_rec.lmp"
 
    if os.path.exists(s_file):
