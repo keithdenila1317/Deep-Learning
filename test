@@ -1,2 +1,0 @@
-import vizdoom as vzd
-print(vzd.scenarios_path)

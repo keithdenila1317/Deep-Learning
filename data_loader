@@ -1,0 +1,68 @@
+import torch
+from torch.utils.data import Dataset, DataLoader, random_split
+import numpy as np
+import torchvision.transforms as transformers
+
+class Augmentation :
+    
+    # change is_train when validating with testing
+    def __init__ (self, dataset_npz, is_train = True) :
+
+        # ram issue change np.load to load batches instead of entire array
+        data = np.load(dataset_npz)
+        self.frames = data['frames']
+        self.actions = data['actions']
+        self.is_train = is_train
+
+        # adds noise / differientiates frames 
+        if self.is_train :
+
+            self.transform = transformers.Compose([transformers.ColorJitter(brightness = 0.2, contrast = 0.2)])
+        else :
+            self.transform = None
+
+    def __len__ (self) :
+        
+        return len(self.frames)
+    
+    def __get_item__ (self, index) :
+
+        # normalization with correct channel dimension (x, x, x)
+        frame = self.frames[index].astype(np.float32) / 255.0
+        frame = torch.tensor(frame).unsqueeze(0)
+
+        # training goes through transformation, will skip when testing
+        if self.transform :
+
+            frame = self.transform(frame)
+
+        action = self.actions[index]
+
+        # Movement (W, A, S, D, and Mouse 1)
+        binary_actions = torch.tensor(action[:5], dtype = torch.float32)
+
+        # Vertical and Horizontal mouse movement ([up,down], [left,right])
+        float_actions = torch.tensor(action[5:], dtype = torch.float32)
+
+        return frame, binary_actions, float_actions
+    
+def get_loaders(dataset_npz, batch_size = 32) :
+
+    # train/test switch
+    data_set = Augmentation(dataset_npz, is_train = True)
+
+    # split 80-20 can be adjusted
+    training_split = int(0.80 * len(data_set))
+    validation_split = len(data_set) - training_split
+
+    # splitting the frames into the two sections randomly
+    training_split, validation_split = random_split(data_set, [training_split, validation_split])
+
+    # when testing, disable augmenting
+    validation_split.dataset.is_train = False
+
+    training_loader = DataLoader(training_split, batch_size = batch_size, shuffle = True)
+    validation_loader = DataLoader(validation_split, batch_size = batch_size, shuffle = False)
+
+    return training_loader, validation_loader
+
