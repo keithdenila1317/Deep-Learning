@@ -1,0 +1,23 @@
+============================================================
+NOVICE MODEL
+============================================================
+Button accuracy:   88.46%
+Exact match rate:  53.72%
+Mouse MSE:         4.782906
+
+============================================================
+EXPERT MODEL
+============================================================
+Button accuracy:   80.41%
+Exact match rate:  38.14%
+Mouse MSE:         9.112248
+
+============================================================
+COMPARISON
+============================================================
+Novice Button Accuracy:   88.46%
+Expert Button Accuracy:   80.41%
+Novice Exact Match Rate:   53.72%
+Expert Exact Match Rate:   38.14%
+Novice Mouse MSE:          4.782906
+Expert Mouse MSE:          9.112248
