@@ -42,7 +42,8 @@ class Augmentation :
         binary_actions = torch.tensor(action[:5], dtype = torch.float32)
 
         # Vertical and Horizontal mouse movement ([up,down], [left,right])
-        float_actions = torch.tensor(action[5:], dtype = torch.float32)
+        normalized_actions = action[5:] / 55.0
+        float_actions = torch.tensor(normalized_actions, dtype = torch.float32)
 
         return frame, binary_actions, float_actions
     
