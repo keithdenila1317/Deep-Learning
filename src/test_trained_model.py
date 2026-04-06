@@ -1,10 +1,12 @@
 from pathlib import Path
 import argparse
+import sys
 
 import torch
 from torch.utils.data import DataLoader
 
-from dataset import VizDoomDataset
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from data_loader import Augmentation
 from model import VizDoomCNN
 
 
@@ -42,25 +44,23 @@ def evaluate_model(model, loader, device):
     first_batch = None
 
     with torch.no_grad():
-        for frames, actions in loader:
+        for frames, button_true, mouse_true in loader:
             frames = frames.to(device)
-            actions = actions.to(device)
+            button_true = button_true.to(device)
+            mouse_true = mouse_true.to(device)
 
             button_logits, mouse_output = model(frames)
             button_probs = torch.sigmoid(button_logits)
             button_pred = (button_probs > 0.5).float()
 
-            button_true = actions[:, :5]
-            mouse_true = actions[:, 5:]
-
             if first_batch is None:
                 first_batch = {
                     "button_probs": button_probs[:8].cpu(),
                     "mouse_output": mouse_output[:8].cpu(),
-                    "actions": actions[:8].cpu(),
+                    "actions": torch.cat([button_true[:8], mouse_true[:8]], dim=1).cpu(),
                 }
 
-            total_samples += actions.size(0)
+            total_samples += frames.size(0)
             total_button_correct += (button_pred == button_true).sum().item()
             total_button_labels += button_true.numel()
             total_exact_match += (button_pred == button_true).all(dim=1).sum().item()
@@ -85,8 +85,8 @@ def main(args):
     novice_dataset_path = resolve_dataset_path(args.novice_dataset_path)
     expert_dataset_path = resolve_dataset_path(args.expert_dataset_path)
 
-    novice_dataset = VizDoomDataset(novice_dataset_path, sequence_length=args.sequence_length)
-    expert_dataset = VizDoomDataset(expert_dataset_path, sequence_length=args.sequence_length)
+    novice_dataset = Augmentation(str(novice_dataset_path), is_train=False)
+    expert_dataset = Augmentation(str(expert_dataset_path), is_train=False)
 
     novice_loader = DataLoader(novice_dataset, batch_size=args.batch_size, shuffle=False)
     expert_loader = DataLoader(expert_dataset, batch_size=args.batch_size, shuffle=False)
@@ -176,7 +176,6 @@ if __name__ == "__main__":
     parser.add_argument("--expert_dataset_path", type=str, default="data/raw/expert_dataset.npz")
     parser.add_argument("--novice_checkpoint", type=str, default="checkpoints/novice_model_best.pth")
     parser.add_argument("--expert_checkpoint", type=str, default="checkpoints/expert_model_best.pth")
-    parser.add_argument("--sequence_length", type=int, default=8)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--output_file", type=str, default="evaluation_results.txt")
     args = parser.parse_args()
