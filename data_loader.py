@@ -25,7 +25,7 @@ class Augmentation :
         
         return len(self.frames)
     
-    def __get_item__ (self, index) :
+    def __getitem__ (self, index) :
 
         # normalization with correct channel dimension (x, x, x)
         frame = self.frames[index].astype(np.float32) / 255.0

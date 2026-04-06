@@ -7,6 +7,11 @@ import torch.optim as optim
 
 from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from data_loader import get_loaders
 
 from dataset import VizDoomDataset
 from model import VizDoomCNN
@@ -67,8 +72,7 @@ def compute_button_pos_weight(loader, num_buttons=5, eps=1e-6, clamp_min=0.1, cl
     pos_count = torch.zeros(num_buttons, dtype=torch.float64)
     total_count = 0
 
-    for _, actions in loader:
-        buttons = actions[:, :num_buttons]
+    for _, buttons, _ in loader:
         pos_count += buttons.sum(dim=0).to(torch.float64)
         total_count += buttons.size(0)
 
@@ -87,12 +91,10 @@ def train_one_epoch(model, loader, optimizer, button_criterion, mouse_criterion,
     model.train()
     running_loss = 0.0
 
-    for frames, actions in tqdm(loader, desc="Training", leave=False):
+    for frames, buttons, mouse in tqdm(loader, desc="Training", leave=False):
         frames = frames.to(device)
-        actions = actions.to(device)
-
-        buttons = actions[:, :5]
-        mouse = actions[:, 5:]
+        buttons = buttons.to(device)
+        mouse = mouse.to(device)
 
         optimizer.zero_grad()
 
@@ -115,12 +117,10 @@ def validate_one_epoch(model, loader, button_criterion, mouse_criterion, device)
     running_loss = 0.0
 
     with torch.no_grad():
-        for frames, actions in tqdm(loader, desc="Validation", leave=False):
+        for frames, buttons, mouse in tqdm(loader, desc="Validation", leave=False):
             frames = frames.to(device)
-            actions = actions.to(device)
-
-            buttons = actions[:, :5]
-            mouse = actions[:, 5:]
+            buttons = buttons.to(device)
+            mouse = mouse.to(device)
 
             button_logits, mouse_pred = model(frames)
 
@@ -139,38 +139,9 @@ def main(args):
 
     dataset_path = resolve_dataset_path(args.dataset_path)
     print(f"Using dataset: {dataset_path}")
-    dataset = VizDoomDataset(dataset_path, sequence_length=args.sequence_length)
 
-    train_size = int(args.train_split * len(dataset))
-    val_size = len(dataset) - train_size
-
-    generator = torch.Generator().manual_seed(args.seed)
-
-    train_dataset, val_dataset = random_split(
-        dataset,
-        [train_size, val_size],
-        generator=generator
-    )
-
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=args.batch_size,
-        shuffle=True,
-        num_workers=args.num_workers,
-        pin_memory=torch.cuda.is_available()
-    )
-
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=args.batch_size,
-        shuffle=False,
-        num_workers=args.num_workers,
-        pin_memory=torch.cuda.is_available()
-    )
-
-    print(f"Total samples: {len(dataset)}")
-    print(f"Train samples: {len(train_dataset)}")
-    print(f"Validation samples: {len(val_dataset)}")
+    train_loader, val_loader = get_loaders(str(dataset_path), batch_size=args.batch_size)
+    print(f"Loaded training and validation loaders from {dataset_path}")
 
     model = VizDoomCNN(dropout=args.dropout).to(device)
 
@@ -274,34 +245,10 @@ if __name__ == "__main__":
         help="Learning rate"
     )
     parser.add_argument(
-        "--train_split",
-        type=float,
-        default=0.8,
-        help="Fraction of data used for training"
-    )
-    parser.add_argument(
         "--dropout",
         type=float,
         default=0.3,
         help="Dropout rate for the model"
-    )
-    parser.add_argument(
-        "--num_workers",
-        type=int,
-        default=0,
-        help="Number of DataLoader workers"
-    )
-    parser.add_argument(
-        "--seed",
-        type=int,
-        default=42,
-        help="Random seed for reproducible split"
-    )
-    parser.add_argument(
-        "--sequence_length",
-        type=int,
-        default=8,
-        help="Number of consecutive frames per training sample"
     )
     parser.add_argument(
         "--no_weighted_bce",
