@@ -9,8 +9,8 @@ import numpy as np
 import os
 import glob
 
-skill_level = "Recordings/Expert"
-output = "expert_dataset.npz"
+skill_level = "Recordings/Novice"
+output = "novice_dataset.npz"
 
 frames = 4
 
@@ -31,7 +31,7 @@ def extract() :
     game.set_screen_resolution(vzd.ScreenResolution.RES_160X120)
     game.set_screen_format(vzd.ScreenFormat.GRAY8)
     game.set_render_hud(False)
-    game.set_window_visible(False)
+    game.set_window_visible(True)
 
     game.set_mode(vzd.Mode.SPECTATOR)
     game.init()
@@ -60,13 +60,24 @@ def extract() :
     
     game.close()
 
-    array_frames = np.array(total_frames, dtype = np.uint8)
-    array_actions = np.array(total_actions, dtype = np.float32)
+    new_frames = np.array(total_frames, dtype = np.uint8)
+    new_actions = np.array(total_actions, dtype = np.float32)
 
-    print(f"Total Frames: {array_frames.shape[0]}")
-    print(f"Action Array: {array_actions.shape}")
+    if os.path.exists(output) :
+        
+        old_data = np.load(output)
+        old_frames = old_data['frames']
+        old_actions = old_data['actions']
 
-    np.savez_compressed(output, frames = array_frames, actions = array_actions)
+        final_frames = np.concatenate((old_frames, new_frames), axis = 0)
+        final_actions = np.concatenate((old_actions, new_actions), axis = 0)
+
+    else:
+
+        final_frames = new_frames
+        final_actions = new_actions
+
+    np.savez_compressed(output, frames = final_frames, actions = final_actions)
 
 if __name__ == "__main__" :
 
