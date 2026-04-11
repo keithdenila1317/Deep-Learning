@@ -68,7 +68,11 @@ class SignedMSELoss(nn.Module):
 
 
 def compute_button_pos_weight(loader, num_buttons=5, eps=1e-6, clamp_min=0.1, clamp_max=20.0):
-    """Compute per-button positive weights as neg/pos for BCEWithLogitsLoss."""
+    """Compute softened per-button positive weights from class frequency.
+
+    Uses sqrt((neg / pos)) and normalizes the vector to mean 1 so rare classes
+    are upweighted without making the loss overly aggressive.
+    """
     pos_count = torch.zeros(num_buttons, dtype=torch.float64)
     total_count = 0
 
@@ -81,7 +85,8 @@ def compute_button_pos_weight(loader, num_buttons=5, eps=1e-6, clamp_min=0.1, cl
 
     total_per_button = torch.full_like(pos_count, float(total_count))
     neg_count = total_per_button - pos_count
-    pos_weight = neg_count / torch.clamp(pos_count, min=eps)
+    pos_weight = torch.sqrt(neg_count / torch.clamp(pos_count, min=eps))
+    pos_weight = pos_weight / torch.clamp(pos_weight.mean(), min=eps)
     pos_weight = torch.clamp(pos_weight, min=clamp_min, max=clamp_max)
 
     return pos_weight.to(torch.float32)
@@ -140,8 +145,35 @@ def main(args):
     dataset_path = resolve_dataset_path(args.dataset_path)
     print(f"Using dataset: {dataset_path}")
 
-    train_loader, val_loader = get_loaders(str(dataset_path), batch_size=args.batch_size)
-    print(f"Loaded training and validation loaders from {dataset_path}")
+    # Use a single loader API for both single-frame and temporal modes
+    if args.sequence_length > 1:
+        print(f"\n=== USING TEMPORAL SEQUENCES ===")
+        print(f"Sequence length: {args.sequence_length} frames per sample")
+    else:
+        print(f"\n=== USING SINGLE FRAMES (NO TEMPORAL CONTEXT) ===")
+
+    train_loader, val_loader = get_loaders(
+        str(dataset_path),
+        batch_size=args.batch_size,
+        sequence_length=args.sequence_length,
+    )
+    
+    print(f"Loaded {len(train_loader)} train batches, {len(val_loader)} val batches\n")
+
+    # Diagnostic: show batch shapes and data ranges
+    for frames, buttons, mouse in train_loader:
+        print(f"Sample batch shapes:")
+        print(f"  frames: {frames.shape} (expected [B, T, 1, H, W])")
+        print(f"  buttons: {buttons.shape}")
+        print(f"  mouse: {mouse.shape}")
+        print(f"\nData ranges:")
+        print(f"  frames: [{frames.min():.3f}, {frames.max():.3f}]")
+        print(f"  mouse: [{mouse.min():.3f}, {mouse.max():.3f}]")
+        
+        # Check button distribution
+        button_sums = buttons.sum(dim=0)
+        print(f"  buttons pressed (sample): {button_sums.int().tolist()} / {buttons.size(0)}")
+        break
 
     model = VizDoomCNN(dropout=args.dropout).to(device)
 
@@ -249,6 +281,12 @@ if __name__ == "__main__":
         type=float,
         default=0.3,
         help="Dropout rate for the model"
+    )
+    parser.add_argument(
+        "--sequence_length",
+        type=int,
+        default=4,
+        help="Number of frames per temporal sequence (default 4). Set to 1 for single-frame training (not recommended)"
     )
     parser.add_argument(
         "--no_weighted_bce",
