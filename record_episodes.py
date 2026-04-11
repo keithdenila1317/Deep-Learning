@@ -26,7 +26,7 @@ wad_path = os.path.join(vzd.scenarios_path, "deathmatch.wad")
 game.set_doom_scenario_path(wad_path)
 game.set_episode_timeout(10500)
 
-game.set_screen_resolution(vzd.ScreenResolution.RES_1920X1080)
+game.set_screen_resolution(vzd.ScreenResolution.RES_512X384)
 game.set_render_hud(False)
 
 game.set_mode(vzd.Mode.ASYNC_SPECTATOR)
@@ -53,7 +53,6 @@ game.send_game_command("bind s +back")
 game.send_game_command("bind a +moveleft")
 game.send_game_command("bind d +moveright")
 
-
 if not os.path.exists(target_recording) :
     os.makedirs(target_recording)
 
@@ -69,7 +68,7 @@ for filename in os.listdir(target_recording) :
 start_index = max_count + 1
 
 # Number of recordings per session
-episodes = 1
+episodes = 5
 
 print("\nRECORDING EPISODES")
 print("************************\n")
