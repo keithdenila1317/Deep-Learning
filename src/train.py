@@ -92,7 +92,36 @@ def compute_button_pos_weight(loader, num_buttons=5, eps=1e-6, clamp_min=0.1, cl
     return pos_weight.to(torch.float32)
 
 
-def train_one_epoch(model, loader, optimizer, button_criterion, mouse_criterion, device):
+def parse_fixed_button_weights(weight_str, expected_len=5):
+    """Parse comma-separated fixed button weights from CLI."""
+    if not weight_str:
+        return None
+
+    parts = [item.strip() for item in weight_str.split(",") if item.strip()]
+    if len(parts) != expected_len:
+        raise ValueError(
+            f"Expected {expected_len} weights, got {len(parts)} from '{weight_str}'"
+        )
+
+    try:
+        weights = [float(item) for item in parts]
+    except ValueError as exc:
+        raise ValueError(
+            f"Could not parse fixed button weights from '{weight_str}'"
+        ) from exc
+
+    return torch.tensor(weights, dtype=torch.float32)
+
+
+def train_one_epoch(
+    model,
+    loader,
+    optimizer,
+    button_criterion,
+    mouse_criterion,
+    mouse_loss_weight,
+    device,
+):
     model.train()
     running_loss = 0.0
 
@@ -107,7 +136,7 @@ def train_one_epoch(model, loader, optimizer, button_criterion, mouse_criterion,
 
         button_loss = button_criterion(button_logits, buttons)
         mouse_loss = mouse_criterion(mouse_pred, mouse)
-        loss = button_loss + mouse_loss
+        loss = button_loss + (mouse_loss_weight * mouse_loss)
 
         loss.backward()
         optimizer.step()
@@ -117,7 +146,14 @@ def train_one_epoch(model, loader, optimizer, button_criterion, mouse_criterion,
     return running_loss / len(loader)
 
 
-def validate_one_epoch(model, loader, button_criterion, mouse_criterion, device):
+def validate_one_epoch(
+    model,
+    loader,
+    button_criterion,
+    mouse_criterion,
+    mouse_loss_weight,
+    device,
+):
     model.eval()
     running_loss = 0.0
 
@@ -131,7 +167,7 @@ def validate_one_epoch(model, loader, button_criterion, mouse_criterion, device)
 
             button_loss = button_criterion(button_logits, buttons)
             mouse_loss = mouse_criterion(mouse_pred, mouse)
-            loss = button_loss + mouse_loss
+            loss = button_loss + (mouse_loss_weight * mouse_loss)
 
             running_loss += loss.item()
 
@@ -177,7 +213,16 @@ def main(args):
 
     model = VizDoomCNN(dropout=args.dropout).to(device)
 
-    if not args.no_weighted_bce:
+    fixed_button_weights = parse_fixed_button_weights(args.fixed_button_pos_weight)
+
+    if args.no_weighted_bce:
+        button_criterion = nn.BCEWithLogitsLoss()
+        print("Using standard BCEWithLogitsLoss")
+    elif fixed_button_weights is not None:
+        pos_weight = fixed_button_weights.to(device)
+        button_criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+        print(f"Using fixed weighted BCE with pos_weight={pos_weight.tolist()}")
+    else:
         pos_weight = compute_button_pos_weight(
             train_loader,
             num_buttons=5,
@@ -186,9 +231,6 @@ def main(args):
         ).to(device)
         button_criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
         print(f"Using weighted BCE with pos_weight={pos_weight.tolist()}")
-    else:
-        button_criterion = nn.BCEWithLogitsLoss()
-        print("Using standard BCEWithLogitsLoss")
 
     if not args.no_signed_mouse_loss:
         mouse_criterion = SignedMSELoss(wrong_sign_scale=args.wrong_sign_scale)
@@ -196,6 +238,8 @@ def main(args):
     else:
         mouse_criterion = nn.MSELoss()
         print("Using standard MSELoss")
+
+    print(f"Using mouse_loss_weight={args.mouse_loss_weight}")
 
     optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
 
@@ -210,6 +254,7 @@ def main(args):
             optimizer,
             button_criterion,
             mouse_criterion,
+            args.mouse_loss_weight,
             device
         )
 
@@ -218,6 +263,7 @@ def main(args):
             val_loader,
             button_criterion,
             mouse_criterion,
+            args.mouse_loss_weight,
             device
         )
 
@@ -294,6 +340,12 @@ if __name__ == "__main__":
         help="Disable per-button class weights for BCE loss"
     )
     parser.add_argument(
+        "--fixed_button_pos_weight",
+        type=str,
+        default="",
+        help="Optional fixed per-button pos_weight as comma-separated values (e.g. 5,1,1,1,2). Overrides computed weights when provided"
+    )
+    parser.add_argument(
         "--pos_weight_min",
         type=float,
         default=0.1,
@@ -315,6 +367,12 @@ if __name__ == "__main__":
         type=float,
         default=0.33,
         help="Penalty scale for wrong mouse sign in SignedMSELoss"
+    )
+    parser.add_argument(
+        "--mouse_loss_weight",
+        type=float,
+        default=1.0,
+        help="Scale factor applied to mouse loss in total loss"
     )
 
     args = parser.parse_args()
