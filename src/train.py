@@ -256,7 +256,7 @@ def main(args):
             mouse_criterion,
             args.mouse_loss_weight,
             device
-        )
+        ),
 
         val_loss = validate_one_epoch(
             model,
