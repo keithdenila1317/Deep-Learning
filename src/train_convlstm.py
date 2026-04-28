@@ -10,7 +10,6 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from data_loader import get_loaders
 from dataset import VizDoomDataset
 
 
@@ -136,7 +135,6 @@ class ConvLSTM(nn.Module):
 
 
 class VizDoomConvLSTM(nn.Module):
-    """ConvLSTM-based model for VizDoom."""
     def __init__(self, dropout=0.3, hidden_channels=64, num_layers=2):
         super().__init__()
 
@@ -230,14 +228,14 @@ def train_epoch(model, train_loader, optimizer, device, button_criterion, mouse_
     total_loss = 0.0
     pbar = tqdm(train_loader, desc="Training")
 
-    for batch_idx, batch in enumerate(pbar):
-        states = batch["states"].to(device)
-        buttons = batch["buttons"].to(device)
-        mouse = batch["mouse"].to(device)
+    for frames, buttons, mouse in pbar:
+        frames = frames.to(device)
+        buttons = buttons.to(device)
+        mouse = mouse.to(device)
 
         optimizer.zero_grad()
 
-        button_logits, mouse_output = model(states)
+        button_logits, mouse_output = model(frames)
 
         button_loss = button_criterion(button_logits, buttons)
         mouse_loss = mouse_criterion(mouse_output, mouse)
@@ -259,12 +257,12 @@ def validate(model, val_loader, device, button_criterion, mouse_criterion):
 
     with torch.no_grad():
         pbar = tqdm(val_loader, desc="Validation")
-        for batch in pbar:
-            states = batch["states"].to(device)
-            buttons = batch["buttons"].to(device)
-            mouse = batch["mouse"].to(device)
+        for frames, buttons, mouse in pbar:
+            frames = frames.to(device)
+            buttons = buttons.to(device)
+            mouse = mouse.to(device)
 
-            button_logits, mouse_output = model(states)
+            button_logits, mouse_output = model(frames)
 
             button_loss = button_criterion(button_logits, buttons)
             mouse_loss = mouse_criterion(mouse_output, mouse)
@@ -277,9 +275,9 @@ def validate(model, val_loader, device, button_criterion, mouse_criterion):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Train ConvLSTM model for VizDoom")
-    parser.add_argument("--expert_data", type=str, default="data/raw/expert_dataset.npz")
-    parser.add_argument("--novice_data", type=str, default="data/raw/novice_dataset.npz")
+    parser = argparse.ArgumentParser(description="Train a ConvLSTM model for one VizDoom dataset")
+    parser.add_argument("--dataset_type", type=str, choices=["expert", "novice"], required=True)
+    parser.add_argument("--dataset_path", type=str, default="", help="Optional override path to a .npz dataset file")
     parser.add_argument("--batch_size", type=int, default=16)
     parser.add_argument("--num_epochs", type=int, default=50)
     parser.add_argument("--learning_rate", type=float, default=0.001)
@@ -288,24 +286,25 @@ def main():
     parser.add_argument("--convlstm_layers", type=int, default=2)
     parser.add_argument("--checkpoint_dir", type=str, default="checkpoints/v3_convlstm")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
-    parser.add_argument("--label", type=str, default="convlstm", choices=["expert", "novice", "convlstm"])
+    parser.add_argument("--sequence_length", type=int, default=4, help="Number of consecutive frames per sample")
 
     args = parser.parse_args()
 
     device = torch.device(args.device)
     os.makedirs(args.checkpoint_dir, exist_ok=True)
 
-    expert_path = resolve_dataset_path(args.expert_data)
-    novice_path = resolve_dataset_path(args.novice_data)
+    if args.dataset_path:
+        dataset_path = resolve_dataset_path(args.dataset_path)
+    else:
+        default_path = "data/raw/expert_dataset.npz" if args.dataset_type == "expert" else "data/raw/novice_dataset.npz"
+        dataset_path = resolve_dataset_path(default_path)
 
-    expert_dataset = VizDoomDataset(str(expert_path))
-    novice_dataset = VizDoomDataset(str(novice_path))
-
-    dataset = torch.utils.data.ConcatDataset([expert_dataset, novice_dataset])
+    dataset = VizDoomDataset(str(dataset_path), sequence_length=args.sequence_length)
 
     train_size = int(0.8 * len(dataset))
     val_size = len(dataset) - train_size
-    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+    generator = torch.Generator().manual_seed(42)
+    train_dataset, val_dataset = random_split(dataset, [train_size, val_size], generator=generator)
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=0)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=0)
@@ -316,14 +315,15 @@ def main():
         num_layers=args.convlstm_layers
     ).to(device)
 
-    button_criterion = nn.CrossEntropyLoss()
+    button_criterion = nn.BCEWithLogitsLoss()
     mouse_criterion = SignedMSELoss()
     optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3, verbose=True)
 
     best_val_loss = float('inf')
 
-    print(f"Training ConvLSTM model on {device}")
+    print(f"Training {args.dataset_type} ConvLSTM model on {device}")
+    print(f"Dataset: {dataset_path}")
     print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     for epoch in range(args.num_epochs):
@@ -336,11 +336,10 @@ def main():
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            torch.save(model.state_dict(), os.path.join(args.checkpoint_dir, f"{args.label}_convlstm_best.pth"))
+            torch.save(model.state_dict(), os.path.join(args.checkpoint_dir, f"{args.dataset_type}_convlstm_best.pth"))
             print(f"  → Saved best model (val_loss: {val_loss:.4f})")
 
-        # Save checkpoint every epoch
-        torch.save(model.state_dict(), os.path.join(args.checkpoint_dir, f"{args.label}_convlstm_last.pth"))
+        torch.save(model.state_dict(), os.path.join(args.checkpoint_dir, f"{args.dataset_type}_convlstm_last.pth"))
 
     print("Training complete!")
 
